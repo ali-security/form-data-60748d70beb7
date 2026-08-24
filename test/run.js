@@ -80,7 +80,7 @@ if (process.env.verbose) {
 }
 
 far.add(__dirname);
-far.include(/test-.*\.js$/);
+far.include(process.env.SEAL_TEST_FILTER ? new RegExp(process.env.SEAL_TEST_FILTER) : /test-.*\.js$/);
 
 // start static server for all tests
 static(function() {

@@ -1,0 +1,85 @@
+name: 'Seal: build and test'
+
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Regex matched against test file names; empty runs the whole suite'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  SEAL_NPM_REGISTRY: 'https://:2024-10-10T03%3A46%3A33.800Z@time-machines-npm.sealsecurity.io/'
+
+jobs:
+  tests:
+    name: 'tests: node ${{ matrix.node-version }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '0.12']
+    steps:
+      - uses: actions/checkout@v4
+
+      # Dependencies are always resolved with the modern npm: the 2016-era
+      # devDependency tree cannot be installed by the npm that ships with
+      # node 0.12. The old runtime only *runs* the suite.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.9.0'
+
+      # --ignore-scripts: phantomjs-prebuilt's install script downloads from
+      # bitbucket.org/ariya/phantomjs/downloads, which was retired in 2022.
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund --registry="$SEAL_NPM_REGISTRY"
+
+      - name: Lint
+        if: matrix.node-version == '22'
+        run: npm run lint
+
+      - name: Run the test suite with coverage
+        if: matrix.node-version == '22'
+        env:
+          SEAL_TEST_FILTER: ${{ inputs.test-filter }}
+        run: npm run tests-only
+
+      - name: Run the test suite on node ${{ matrix.node-version }}
+        if: matrix.node-version != '22'
+        env:
+          SEAL_TEST_FILTER: ${{ inputs.test-filter }}
+        run: |
+          export NVM_DIR="$HOME/.nvm"
+          mkdir -p "$NVM_DIR"
+          curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+          . "$NVM_DIR/nvm.sh"
+          nvm install ${{ matrix.node-version }}
+          rm -rf test/tmp
+          mkdir -p test/tmp
+          "$(nvm which ${{ matrix.node-version }})" test/run.js
+
+  pack:
+    name: 'pack: form-data-2.5.2.tgz'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # node 22.9.0 ships npm 10.8.3 — the exact pair that packed the public
+      # tarball, so `npm pack` reproduces its member set byte for byte.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.9.0'
+
+      - name: Pack the release tarball
+        run: npm pack --ignore-scripts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-tarball
+          path: form-data-2.5.2.tgz
+          if-no-files-found: error
